@@ -29,6 +29,22 @@ interface State {
   lastMoveTime?: number; // timestamp of the last move
 }
 
+const INITIAL_STATE = {
+  snake: [
+    { x: GRID_SIZE / 2 + 2, y: GRID_SIZE / 2 - 1 },
+    { x: GRID_SIZE / 2 + 1, y: GRID_SIZE / 2 - 1 },
+    { x: GRID_SIZE / 2, y: GRID_SIZE / 2 - 1 },
+    { x: GRID_SIZE / 2 - 1, y: GRID_SIZE / 2 - 1 },
+  ],
+  food: { x: 0, y: 0 },
+  direction: Direction.Right,
+  nextDirection: Direction.Right,
+  paused: false,
+  gameOver: true,
+  score: 0,
+  speed: 250,
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   const canvasElement = document.getElementById("game") as HTMLCanvasElement;
 
@@ -43,26 +59,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
-  let state: State | null = null;
+  let state: State = { ...INITIAL_STATE };
 
-  const startGame = () => {
-    state = {
-      snake: [
-        { x: 3, y: 0 },
-        { x: 2, y: 0 },
-        { x: 1, y: 0 },
-        { x: 0, y: 0 },
-      ],
-      food: getRandomPosition(),
-      direction: Direction.Right,
-      nextDirection: Direction.Right,
-      paused: false,
-      gameOver: false,
-      score: 0,
-      speed: 200,
-    };
+  const tick = () => {
+    moveSnake();
+    draw();
+    requestAnimationFrame(tick);
+  };
 
-    tick();
+  const draw = () => {
+    drawFrame();
+
+    if (state.gameOver) {
+      drawGameOver();
+    } else if (state.paused) {
+      drawPaused();
+    } else {
+      drawGame();
+    }
   };
 
   const fillPixelPosition = (position: Position) => {
@@ -75,18 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   };
 
-  const tick = () => {
-    moveSnake();
-    draw();
-    requestAnimationFrame(tick);
-  };
-
-  const draw = () => {
-    if (!state) {
-      console.error("Game state is not initialized.");
-      return;
-    }
-
+  const drawFrame = () => {
     const size = Math.min(globalThis.innerWidth, globalThis.innerHeight);
     canvas.style.width = `${size}px`;
     canvas.style.height = `${size}px`;
@@ -108,12 +111,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Display the title
     ctx.font = "12pt Monospace";
+    ctx.textAlign = "left";
     ctx.fillText("SNAKE", BORDER_SIZE, BORDER_SIZE - 4);
 
     // Display the score
-    ctx.font = "12pt Monospace";
     ctx.fillText(`SCORE: ${state.score}`, BORDER_SIZE, CANVAS_SIZE - 16);
+  };
 
+  const drawGame = () => {
     // Draw the snake
     state.snake.forEach((segment) => {
       fillPixelPosition(segment);
@@ -123,19 +128,44 @@ document.addEventListener("DOMContentLoaded", () => {
     fillPixelPosition(state.food);
   };
 
+  const drawPaused = () => {
+    ctx.font = "12pt Monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("PAUSED", CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+  };
+
+  const drawGameOver = () => {
+    ctx.font = "12pt Monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("PRESS SPACE TO START", CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+  };
+
   const getRandomPosition = (): Position => {
+    console.log("GET RANDOM POSITION");
     const x = Math.floor(Math.random() * GRID_SIZE);
     const y = Math.floor(Math.random() * GRID_SIZE);
-    return { x, y };
+    const newPosition = { x, y };
+
+    if (state.snake.some((s) => positionMatches(s, newPosition))) {
+      return getRandomPosition();
+    }
+
+    return newPosition;
+  };
+
+  const positionMatches = (a: Position, b: Position) => {
+    return a.x === b.x && a.y === b.y;
   };
 
   const moveSnake = () => {
-    if (!state || state.paused || state.gameOver) return;
+    if (state.paused || state.gameOver) return;
     const now = Date.now();
     if (state.lastMoveTime && now - state.lastMoveTime < state.speed) {
       return; // Not enough time has passed to move the snake
     }
     state.lastMoveTime = now;
+    state.direction = state.nextDirection;
+
     const newHead: Position = { ...state.snake[0] };
     switch (state.direction) {
       case Direction.Up:
@@ -152,41 +182,64 @@ document.addEventListener("DOMContentLoaded", () => {
         break;
     }
 
-    state.snake.unshift(newHead);
-    state.snake.pop();
-
-    // Check for collision with itself
+    if (state.snake.some((s) => positionMatches(s, newHead))) {
+      state.gameOver = true;
+    } else if (positionMatches(newHead, state.food)) {
+      state.snake.unshift(newHead);
+      state.score += 1;
+      state.speed = Math.max(50, state.speed - 10);
+      state.food = getRandomPosition();
+    } else {
+      state.snake.unshift(newHead);
+      state.snake.pop();
+    }
   };
 
   globalThis.addEventListener("keydown", (e) => {
-    if (!state || state.gameOver) return;
-    console.log(e.code);
-
-    if (!state.paused) {
-      switch (e.code) {
-        case "ArrowUp":
-          state.direction = Direction.Up;
-          break;
-        case "ArrowDown":
-          state.direction = Direction.Down;
-          break;
-        case "ArrowLeft":
-          state.direction = Direction.Left;
-          break;
-        case "ArrowRight":
-          state.direction = Direction.Right;
-          break;
-        case "Space":
-          console.log("pause");
-          state.paused = true;
-          break;
-      }
-    } else {
-      if (e.code === "Space") {
-        state.paused = false;
-      }
+    switch (e.code) {
+      case "ArrowUp":
+        if (
+          state.direction === Direction.Down ||
+          state.paused ||
+          state.gameOver
+        )
+          return;
+        state.nextDirection = Direction.Up;
+        break;
+      case "ArrowDown":
+        if (state.direction === Direction.Up || state.paused || state.gameOver)
+          return;
+        state.nextDirection = Direction.Down;
+        break;
+      case "ArrowLeft":
+        if (
+          state.direction === Direction.Right ||
+          state.paused ||
+          state.gameOver
+        )
+          return;
+        state.nextDirection = Direction.Left;
+        break;
+      case "ArrowRight":
+        if (
+          state.direction === Direction.Left ||
+          state.paused ||
+          state.gameOver
+        )
+          return;
+        state.nextDirection = Direction.Right;
+        break;
+      case "Space":
+        if (state.gameOver) {
+          state = { ...INITIAL_STATE };
+          state.food = getRandomPosition();
+          state.gameOver = false;
+        } else {
+          state.paused = !state.paused;
+        }
+        break;
     }
   });
 
-  startGame();
+  tick();
 });
